@@ -6,7 +6,7 @@
 
 LOVE      ?= love
 STYLUA    ?= stylua
-LUA_SRC   := main.lua conf.lua src/world.lua src/gfx.lua src/audio.lua src/display.lua src/stage.lua src/save.lua src/test.lua
+LUA_SRC   := main.lua conf.lua src/world.lua src/gfx.lua src/audio.lua src/display.lua src/stage.lua src/save.lua src/test.lua src/balance.lua
 
 help:
 	@printf '%s\n' \
