@@ -331,6 +331,16 @@ function G.setView(x0, x1)
   G.viewRight = x1 or 192
 end
 
+-- Visible horizontal span in playfield coords: x, width. Wider than the
+-- 192 playfield on wide windows, narrower when the sides are cropped.
+-- Use it for anything that should cover the whole screen (dim overlays,
+-- bands, flashes) instead of a hard-coded 0..192.
+function G.viewSpan()
+  local x0 = math.floor((G.viewLeft or 0) - 4)
+  local x1 = math.ceil((G.viewRight or 192) + 4)
+  return x0, math.max(1, x1 - x0)
+end
+
 -- One top-down ground map, straight vertical scroll (Raiden).
 function G.drawParallax(assets, scroll)
   local h = 256

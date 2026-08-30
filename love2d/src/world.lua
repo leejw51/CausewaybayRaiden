@@ -147,8 +147,9 @@ function World:reset(loop)
   self.stars = {}
   local function addStars(n, v0, v1, size, a)
     for _ = 1, n do
+      local vx0, vx1 = self:viewSpan()
       self.stars[#self.stars + 1] = {
-        x = love.math.random(0, 191),
+        x = love.math.random(vx0, vx1 - 1),
         y = love.math.random(0, 255),
         s = size,
         v = v0 + love.math.random() * (v1 - v0),
@@ -1231,7 +1232,21 @@ function World:updateBoss(e, dt)
   end
 end
 
+-- Visible horizontal range in playfield coords (see src/display.lua).
+-- Wider than 0..192 on wide windows; ambient stuff (stars, streaks,
+-- clouds) should cover it, and bullets should not vanish inside it.
+function World:viewSpan()
+  local Display = package.loaded["src.display"]
+  local x0 = Display and Display.viewLeft or 0
+  local x1 = Display and Display.viewRight or 192
+  return math.min(0, x0), math.max(192, x1)
+end
+
 function World:update(dt, input)
+  do
+    local vx0, vx1 = self:viewSpan()
+    self.cullL, self.cullR = vx0 - 16, vx1 + 16
+  end
   if self.hitstop > 0 then
     self.hitstop = self.hitstop - dt
     dt = dt * 0.15
@@ -1276,9 +1291,11 @@ function World:update(dt, input)
     end
   end
 
-  if #self.streaks < 18 and love.math.random() < dt * 22 then
+  local vx0, vx1 = self:viewSpan()
+  local streakCap = math.floor(18 * (vx1 - vx0) / 192)
+  if #self.streaks < streakCap and love.math.random() < dt * 22 * (vx1 - vx0) / 192 then
     self.streaks[#self.streaks + 1] = {
-      x = love.math.random(0, 191),
+      x = love.math.random(vx0, vx1 - 1),
       y = -8,
       len = 8 + love.math.random() * 18,
       v = 180 + love.math.random() * 220,
@@ -1325,7 +1342,7 @@ function World:update(dt, input)
         a = 0.95,
       })
     else
-      local x = 24 + love.math.random() * 144
+      local x = (vx0 + 24) + love.math.random() * ((vx1 - vx0) - 48)
       self:spawnCloud(x, -16, {
         sc = 0.32 + love.math.random() * 0.28,
         vy = 82 + love.math.random() * 28,
@@ -1368,7 +1385,8 @@ function World:update(dt, input)
     st.y = st.y + st.v * dt
     if st.y > 256 then
       st.y = st.y - 256
-      st.x = love.math.random(0, 191)
+      local vx0, vx1 = self:viewSpan()
+      st.x = love.math.random(vx0, vx1 - 1)
     end
   end
 
@@ -1418,6 +1436,8 @@ function World:update(dt, input)
     end
     p.x = p.x + dx * spd * dt
     p.y = p.y + dy * spd * dt
+    -- The ship may use the whole visible width (see src/display.lua):
+    -- wider than the 192 playfield on wide windows, narrower when cropped.
     local Display = require "src.display"
     local x0 = (Display.viewLeft or 0) + 10
     local x1 = (Display.viewRight or 192) - 10
@@ -1479,7 +1499,7 @@ function World:update(dt, input)
     if b.trail then
       self:spark(b.x, b.y + 4, -b.vx * 0.05, -b.vy * 0.08, b.col or G.palette.cyan, 0.14, b.agent and 1 or 1.6)
     end
-    if b.y < -12 or b.life <= 0 or b.x < -10 or b.x > 202 then
+    if b.y < -12 or b.life <= 0 or b.x < (self.cullL or -16) or b.x > (self.cullR or 208) then
       table.remove(self.pbullets, i)
     end
   end
@@ -1504,7 +1524,7 @@ function World:update(dt, input)
       end
       if e.hp <= 0 then
         self:killEnemy(e)
-      elseif e.y > 276 or e.y < -60 or e.x < -50 or e.x > 242 then
+      elseif e.y > 276 or e.y < -60 or e.x < (self.cullL or -16) - 34 or e.x > (self.cullR or 208) + 34 then
         if not e.boss then
           table.remove(self.enemies, i)
         end
@@ -1553,7 +1573,7 @@ function World:update(dt, input)
     b.x = b.x + b.vx * dt
     b.y = b.y + b.vy * dt
     b.life = b.life - dt
-    if b.y < -16 or b.y > 272 or b.x < -16 or b.x > 208 or b.life <= 0 then
+    if b.y < -16 or b.y > 272 or b.x < (self.cullL or -16) or b.x > (self.cullR or 208) or b.life <= 0 then
       table.remove(self.ebullets, i)
     elseif self.pbeam and math.abs(b.x - self.pbeam) < 3.4 and b.y < p.y then
       table.remove(self.ebullets, i)
@@ -1942,7 +1962,8 @@ function World:draw()
 
   if self.bombFlash > 0 then
     love.graphics.setColor(1, 0.55, 0.25, self.bombFlash * 0.32)
-    love.graphics.rectangle("fill", 0, 0, 192, 256)
+    local fx0, fw = G.viewSpan()
+    love.graphics.rectangle("fill", fx0, 0, fw, 256)
   end
   if self.ownRing then
     local R = self.ownRing
@@ -2061,7 +2082,8 @@ function World:draw()
     love.graphics.setColor(1, 1, 1, 0.18 * fade)
     love.graphics.rectangle("fill", fx.x - 1, 0, 2, 256)
     love.graphics.setColor(0, 0, 0, 0.55 * fade)
-    love.graphics.rectangle("fill", 0, 86 + rise, 192, 38)
+    local bx0, bw = G.viewSpan()
+    love.graphics.rectangle("fill", bx0, 86 + rise, bw, 38)
     local name = fx.name or "AGENT"
     local scale = (#name <= 6) and 2 or 1
     local w = G.textWidth(name, scale)
