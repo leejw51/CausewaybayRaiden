@@ -221,6 +221,9 @@ function love.load(args)
       verify = true
       state = "title"
       stateT = 4
+    elseif a == "--windowed" then
+      Display.fullscreen = true
+      Display.toggleFullscreen()
     end
   end
   loadHiscore()
@@ -235,8 +238,8 @@ function love.load(args)
   Audio.music("title")
 end
 
-function love.resize()
-  -- integer scale is recomputed every frame
+function love.resize(w, h)
+  Display.resize(w, h)
 end
 
 function love.mousepressed(x, y, button)
@@ -244,11 +247,7 @@ function love.mousepressed(x, y, button)
     return
   end
   local id = Display.hitButton(x, y)
-  if id == "layout" then
-    Display.toggleLayout()
-    Audio.play("select")
-    return
-  elseif id == "full" then
+  if id == "full" then
     Display.toggleFullscreen()
     Audio.play("blip")
     return
@@ -284,11 +283,6 @@ function love.keypressed(k)
   if k == "f" or k == "f11" then
     Display.toggleFullscreen()
     Audio.play("blip")
-    return
-  end
-  if k == "tab" or k == "l" then
-    Display.toggleLayout()
-    Audio.play("select")
     return
   end
   if k == "c" then
@@ -599,7 +593,8 @@ local function drawTitle()
   love.graphics.draw(assets.title, 0, 0)
 
   love.graphics.setColor(0.03, 0.02, 0.10, 0.78)
-  love.graphics.rectangle("fill", 0, 104, 192, 152)
+  local vx, vw = G.viewSpan()
+  love.graphics.rectangle("fill", vx, 104, vw, 152)
 
   local flash = math.floor(blink * 8) % 2 == 0
   G.center("CAUSEWAYBAY", 108, flash and G.palette.yellow or G.palette.rust, 1)
@@ -617,8 +612,9 @@ local function drawMap()
     love.graphics.draw(assets.worldMap, 0, 0)
   end
   love.graphics.setColor(0.03, 0.02, 0.10, 0.55)
-  love.graphics.rectangle("fill", 0, 0, 192, 28)
-  love.graphics.rectangle("fill", 0, 214, 192, 42)
+  local vx, vw = G.viewSpan()
+  love.graphics.rectangle("fill", vx, 0, vw, 28)
+  love.graphics.rectangle("fill", vx, 214, vw, 42)
   G.center("WORLD 1 HONG KONG", 8, G.palette.yellow, 1)
 
   -- Dotted path between nodes
@@ -688,7 +684,8 @@ local function drawDiff()
     love.graphics.draw(assets.worldMap, 0, 0)
   end
   love.graphics.setColor(0.03, 0.02, 0.10, 0.78)
-  love.graphics.rectangle("fill", 0, 0, 192, 256)
+  local vx, vw = G.viewSpan()
+  love.graphics.rectangle("fill", vx, 0, vw, 256)
   G.center("LEVEL", 36, G.palette.yellow, 2)
   G.center("CHOOSE RANK", 62, G.palette.cyan, 1)
   local n = MAP[mapCursor] or MAP[1]
@@ -710,36 +707,42 @@ local function drawDiff()
   G.center("ESC MAP", 230, G.palette.magenta, 1)
 end
 
-local function drawStoryPage(page, ox)
+local function drawStoryPage(page, ox, pass)
   if math.abs(ox) >= 192 then
     return
   end
   love.graphics.push()
   love.graphics.translate(ox, 0)
-  local img = assets[page.img]
-  if img then
-    love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.draw(img, 0, 0)
-  end
-  love.graphics.setColor(0.03, 0.02, 0.10, 0.78)
-  local x0 = G.viewLeft or 0
-  local vw = (G.viewRight or 192) - x0
-  love.graphics.rectangle("fill", x0, 138, vw, 118)
-  local y = 158
-  for _, line in ipairs(page.lines) do
-    G.center(line, y, G.palette.white, 1)
-    y = y + 14
+  if pass == "art" then
+    local img = assets[page.img]
+    if img then
+      love.graphics.setColor(1, 1, 1, 1)
+      love.graphics.draw(img, 0, 0)
+    end
+  else
+    local y = 158
+    for _, line in ipairs(page.lines) do
+      G.center(line, y, G.palette.white, 1)
+      y = y + 14
+    end
   end
   love.graphics.pop()
 end
 
 local function drawStory()
   love.graphics.clear(0, 0, 0, 0)
-  love.graphics.setScissor(0, 0, 192, 256)
+  -- Art slides page by page; the text band spans the whole visible width
+  -- once, so wide windows are dimmed edge to edge and never double-dimmed
+  -- while two pages overlap mid-slide.
   for i, page in ipairs(STORY) do
-    drawStoryPage(page, (i - 1 - storyPos) * 192)
+    drawStoryPage(page, (i - 1 - storyPos) * 192, "art")
   end
-  love.graphics.setScissor()
+  love.graphics.setColor(0.03, 0.02, 0.10, 0.78)
+  local vx, vw = G.viewSpan()
+  love.graphics.rectangle("fill", vx, 138, vw, 118)
+  for i, page in ipairs(STORY) do
+    drawStoryPage(page, (i - 1 - storyPos) * 192, "text")
+  end
   G.center("STORY " .. tostring(storyPage) .. "/" .. tostring(#STORY), 142, G.palette.cyan, 1)
 end
 
@@ -751,7 +754,8 @@ local function drawEnding()
     love.graphics.draw(endArt, 0, 0)
   end
   love.graphics.setColor(0.03, 0.02, 0.10, 0.7)
-  love.graphics.rectangle("fill", 0, 132, 192, 124)
+  local vx, vw = G.viewSpan()
+  love.graphics.rectangle("fill", vx, 132, vw, 124)
   G.center("THE END", 138, G.palette.yellow, 1)
   G.center("PRINCESS PITCH", 154, G.palette.magenta, 1)
   G.center("HKU BURGER CLEAR", 168, G.palette.cyan, 1)
@@ -766,7 +770,8 @@ end
 
 local function drawPause()
   love.graphics.setColor(0, 0, 0, 0.6)
-  love.graphics.rectangle("fill", 0, 0, 192, 256)
+  local vx, vw = G.viewSpan()
+  love.graphics.rectangle("fill", vx, 0, vw, 256)
   G.center("PAUSE", 72, G.palette.yellow, 2)
   G.center("Z SHOT", 112, G.palette.cyan, 1)
   G.center("X BOMB", 126, G.palette.rust, 1)
@@ -781,7 +786,8 @@ end
 
 local function drawContinue()
   love.graphics.setColor(0, 0, 0, 0.6)
-  love.graphics.rectangle("fill", 0, 0, 192, 256)
+  local vx, vw = G.viewSpan()
+  love.graphics.rectangle("fill", vx, 0, vw, 256)
   G.center("CONTINUE?", 90, G.palette.yellow, 2)
   G.center(tostring(math.max(0, math.ceil(continueN))), 118, G.palette.lred, 3)
   G.center("CREDIT " .. tostring(credits), 160, G.palette.cyan, 1)
@@ -794,7 +800,8 @@ end
 
 local function drawGameover()
   love.graphics.setColor(0, 0, 0, 0.65)
-  love.graphics.rectangle("fill", 0, 0, 192, 256)
+  local vx, vw = G.viewSpan()
+  love.graphics.rectangle("fill", vx, 0, vw, 256)
   G.center("GAME OVER", 96, G.palette.lred, 2)
   if world then
     G.center("SCORE " .. string.format("%06d", world.score), 128, G.palette.yellow, 1)
@@ -803,50 +810,6 @@ local function drawGameover()
     G.center("AGENTS " .. tostring(#(world.agents or {})), 168, G.palette.magenta, 1)
   end
   G.center("THE BUGS WON", 188, G.palette.gray, 1)
-end
-
-local function drawBezels(x, y, s, sw, sh)
-  -- Leftover space is already filled with stage background.
-  -- Horizontal mode only overlays HUD on the sides.
-  if Display.layout ~= "horizontal" then
-    return
-  end
-  local leftW = math.max(0, x)
-  local rightX = x + Display.GW * s
-  local rightW = math.max(0, sw - rightX)
-
-  local fs = math.max(1, math.min(2, math.floor(s * 0.4)))
-  local function tprint(str, sx, sy, col)
-    G.print(str, sx, sy, col, fs)
-  end
-
-  if leftW > 40 then
-    local lx = math.floor(leftW * 0.08)
-    tprint("1UP", lx, y + 16, G.palette.cyan)
-    tprint(world and string.format("%06d", world.score) or "000000", lx, y + 16 + 10 * fs, G.palette.white)
-    tprint("LIVES", lx, y + 16 + 28 * fs, G.palette.rust)
-    tprint(world and tostring(math.max(0, world.lives)) or "3", lx, y + 16 + 38 * fs, G.palette.yellow)
-    tprint("BOMB", lx, y + 16 + 54 * fs, G.palette.rust)
-    tprint(world and tostring(world.bombs) or "3", lx, y + 16 + 64 * fs, G.palette.yellow)
-    tprint("AGENT", lx, y + 16 + 80 * fs, G.palette.cyan)
-    tprint(world and tostring(#world.agents) or "0", lx, y + 16 + 90 * fs, G.palette.white)
-    tprint("VIEW", lx, sh - 48 * fs, G.palette.gray)
-    tprint("HORZ", lx, sh - 36 * fs, G.palette.yellow)
-  end
-  if rightW > 40 then
-    local rx = rightX + math.floor(rightW * 0.12)
-    tprint("HI", rx, y + 16, G.palette.cyan)
-    tprint(string.format("%06d", world and world.hiscore or hiscore), rx, y + 16 + 10 * fs, G.palette.yellow)
-    tprint("POWER", rx, y + 16 + 28 * fs, G.palette.cyan)
-    tprint(world and tostring(world.power) or "1", rx, y + 16 + 38 * fs, G.palette.white)
-    tprint("LOOP", rx, y + 16 + 54 * fs, G.palette.magenta)
-    tprint(world and tostring(world.loop) or "1", rx, y + 16 + 64 * fs, G.palette.white)
-    local skills = { "PRINTLN", "TRAIT", "ASYNC", "TOKIO" }
-    tprint("SKILL", rx, y + 16 + 80 * fs, G.palette.cyan)
-    tprint(world and (skills[world.power] or "PRINTLN") or "PRINTLN", rx, y + 16 + 90 * fs, G.palette.yellow)
-    tprint("TAB", rx, sh - 48 * fs, G.palette.gray)
-    tprint("HORZ", rx, sh - 36 * fs, G.palette.yellow)
-  end
 end
 
 function love.draw()
@@ -914,7 +877,6 @@ function love.draw()
     hazeA = hazeA,
     cloudA = cloudA,
   })
-  drawBezels(x, y, s, sw, sh)
   drawPlayHud(sw, sh)
   drawTitleHud(sw, sh)
   drawChromeButtons(sw, sh)
@@ -943,8 +905,10 @@ end
 
 local SKILLS = { "PRINTLN", "TRAIT", "ASYNC", "TOKIO" }
 
-local function hudScale(sw)
-  return math.max(5, math.floor(sw / 155))
+-- Window-space HUD text follows the game's pixel scale, so it stays in
+-- proportion with in-world text no matter how wide the window is.
+local function hudScale()
+  return math.max(2, math.floor(Display.scale * 0.85 + 0.5))
 end
 
 local function wcenter(str, y, col, fs, sw)
@@ -975,8 +939,8 @@ function drawTitleHud(sw, sh)
   for _, s in ipairs(lines) do
     longest = math.max(longest, #s)
   end
-  local fs = math.max(6, math.min(10, math.floor(sw / 110)))
-  fs = math.min(fs, math.max(5, math.floor((sw - 40) / (8 * math.max(1, longest)))))
+  local fs = math.max(2, math.floor(Display.scale * 0.9 + 0.5))
+  fs = math.max(2, math.min(fs, math.floor((sw - 40) / (8 * math.max(1, longest)))))
   local pad = 16
   local btn = Display.uiButtons and Display.uiButtons[1]
   local top = (btn and (btn.y + btn.h) or 36) + 10
@@ -1001,7 +965,7 @@ function drawPlayHud(sw, sh)
   if state ~= "play" and state ~= "pause" and state ~= "continue" and state ~= "gameover" then
     return
   end
-  local fs = hudScale(sw)
+  local fs = hudScale()
   local pad = 12
   local btn = Display.uiButtons and Display.uiButtons[1]
   local top = (btn and (btn.y + btn.h) or 28) + 10
@@ -1069,12 +1033,7 @@ function drawChromeButtons(sw, sh)
   local mx, my = love.mouse.getPosition()
   for _, b in ipairs(Display.uiButtons or {}) do
     local hover = mx >= b.x and mx < b.x + b.w and my >= b.y and my < b.y + b.h
-    local label
-    if b.id == "layout" then
-      label = Display.layout == "vertical" and "VERT" or "HORZ"
-    else
-      label = Display.fullscreen and "FULL" or "WIN"
-    end
+    local label = Display.fullscreen and "FULL" or "WIN"
     love.graphics.setColor(hover and 0.28 or 0.10, hover and 0.16 or 0.08, hover and 0.42 or 0.22, 0.94)
     love.graphics.rectangle("fill", b.x, b.y, b.w, b.h)
     love.graphics.setColor(0.78, 0.32, 0.22, 1)

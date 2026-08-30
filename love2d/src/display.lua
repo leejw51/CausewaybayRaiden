@@ -1,15 +1,34 @@
--- Aspect-correct 192x256 playfield (uniform scale).
--- Extra window space is filled with scrolling stage art, not empty bars.
+-- Virtual-resolution display, done the usual LÖVE way:
+--
+--   * one fixed virtual HEIGHT (GH = 256) and a uniform scale s = winH / GH,
+--     so pixels are never stretched;
+--   * the virtual WIDTH follows the window's aspect ratio, so the canvas
+--     always covers the whole window - no bars, no letterbox;
+--   * the 192x256 playfield (GW x GH, the gameplay safe area) sits centred
+--     in that canvas. Extra width simply shows more of the same world
+--     (ground, clouds, props, enemies flying in). If the window is taller
+--     than 3:4 the playfield's sides are cropped instead;
+--   * layout is recomputed from love.resize, not every frame, and the
+--     canvas is rebuilt only when the virtual size actually changes.
+--
+-- World code keeps drawing in 0..192 playfield coordinates: D.begin()
+-- translates by D.px so the playfield lands in the middle of the canvas.
+-- D.viewLeft / D.viewRight (playfield coords) say what is actually visible;
+-- they go negative / past 192 in wide mode and shrink when cropping.
 
 local D = {}
 
-D.GW, D.GH = 192, 256
-D.layout = "vertical" -- "vertical" | "horizontal"
+D.GW, D.GH = 192, 256 -- playfield (safe area); never changes
+D.VW = 192            -- virtual width currently rendered (>= GW)
+D.px = 0              -- playfield x offset inside the canvas
 D.fullscreen = true
 D.windowScale = 3
 D.canvas = nil
-D.ox, D.oy, D.scale = 0, 0, 3
+D.ox, D.oy, D.scale = 0, 0, 3 -- playfield origin on screen, uniform scale
 D.scaleX, D.scaleY = 3, 3
+D.cx, D.cy = 0, 0             -- canvas origin on screen
+D.sw, D.sh = 0, 0             -- window size the layout was computed for
+D.viewLeft, D.viewRight = 0, 192
 D.shakeX, D.shakeY = 0, 0
 D.uiButtons = {}
 
@@ -34,14 +53,8 @@ end
 function D.init()
   love.graphics.setDefaultFilter("nearest", "nearest")
   love.graphics.setLineStyle("rough")
-  D.canvas = love.graphics.newCanvas(D.GW, D.GH)
-  D.canvas:setFilter("nearest", "nearest")
   D.applyWindow()
-end
-
-function D.toggleLayout()
-  D.layout = (D.layout == "vertical") and "horizontal" or "vertical"
-  D.applyWindow()
+  D.resize(love.graphics.getDimensions())
 end
 
 function D.toggleFullscreen()
@@ -54,58 +67,76 @@ function D.applyWindow()
   if D.fullscreen then
     -- setFullscreen keeps the window and its flags, so macOS keeps the Space.
     -- setMode here could recreate the window and drop it back to legacy mode.
-    love.window.setFullscreen(true, "desktop")
-    return
-  end
-  local maxW = math.max(D.GW, dw - 24)
-  local maxH = math.max(D.GH, dh - 72)
-  if D.layout == "vertical" then
-    -- True 3:4 window so the playfield is never cropped.
+    if love.window.isOpen() then
+      love.window.setFullscreen(true, "desktop")
+    else
+      love.window.setMode(D.GW * D.windowScale, D.GH * D.windowScale, flags())
+    end
+  else
+    -- Windowed preset: a true 3:4 window at the largest integer scale that
+    -- fits the desktop. The window stays resizable; any other shape works.
+    local maxW = math.max(D.GW, dw - 24)
+    local maxH = math.max(D.GH, dh - 72)
     local s = math.max(2, math.min(math.floor(maxW / D.GW), math.floor(maxH / D.GH)))
     D.windowScale = s
     love.window.setMode(D.GW * s, D.GH * s, flags())
-  else
-    local s = math.max(2, math.min(math.floor(maxW / (D.GW + 96)), math.floor(maxH / D.GH)))
-    D.windowScale = s
-    local playH = D.GH * s
-    local w = math.min(maxW, math.max(D.GW * s + 220, math.floor(playH * 16 / 9)))
-    love.window.setMode(w, playH, flags())
   end
+  -- love.resize is not guaranteed after setMode/setFullscreen; sync now.
+  D.resize(love.graphics.getDimensions())
 end
 
-function D.syncLayout()
-  local sw, sh = love.graphics.getDimensions()
-  -- Fill the window HEIGHT so vertical mode has no top/bottom bands.
-  -- 3:4 is kept (uniform scale). Extra width is background; if the
-  -- window is taller than 3:4, sides of the playfield are cropped.
+-- Recompute the virtual resolution for a window size. Called from
+-- love.resize and after our own mode changes.
+function D.resize(sw, sh)
+  sw, sh = math.max(1, math.floor(sw or 1)), math.max(1, math.floor(sh or 1))
   local s = math.max(1, sh / D.GH)
-  local x = math.floor((sw - D.GW * s) / 2)
-  local y = 0
+  -- Canvas is at least the playfield; wider when the window is wider than 3:4.
+  local cw = math.max(D.GW, math.ceil(sw / s))
+  D.VW = cw
+  D.px = math.floor((cw - D.GW) / 2)
   D.scale = s
   D.scaleX, D.scaleY = s, s
-  D.ox, D.oy = x, y
-  D.viewLeft = math.max(0, math.ceil(-x / s))
-  D.viewRight = math.min(D.GW, math.floor((sw - x) / s))
-  return sw, sh, s, x, y
+  D.cx = math.floor((sw - cw * s) / 2) -- 0 in wide mode, negative when cropping
+  D.cy = 0
+  D.ox, D.oy = D.cx + D.px * s, 0
+  D.viewLeft = math.max(-D.px, math.ceil(-D.ox / s))
+  D.viewRight = math.min(cw - D.px, math.floor((sw - D.ox) / s))
+  D.sw, D.sh = sw, sh
+  if not D.canvas or D.canvas:getWidth() ~= cw or D.canvas:getHeight() ~= D.GH then
+    D.canvas = love.graphics.newCanvas(cw, D.GH)
+    D.canvas:setFilter("nearest", "nearest")
+  end
+  D.placeButtons(sw, sh)
+end
+
+-- Cheap guard for frames drawn before love.resize fires (e.g. during the
+-- macOS fullscreen animation). Normally a no-op.
+function D.syncLayout()
+  local sw, sh = love.graphics.getDimensions()
+  if sw ~= D.sw or sh ~= D.sh or not D.canvas then
+    D.resize(sw, sh)
+  end
+  return sw, sh, D.scale, D.ox, D.oy
 end
 
 function D.begin()
   D.syncLayout()
   local G = package.loaded["src.gfx"]
   if G and G.setView then
-    G.setView((D.viewLeft or 0) + 3, (D.viewRight or 192) - 3)
+    G.setView(D.viewLeft + 3, D.viewRight - 3)
   end
   love.graphics.setCanvas(D.canvas)
   love.graphics.clear(0, 0, 0, 0)
+  love.graphics.push()
+  love.graphics.translate(D.px, 0)
 end
 
 function D.placeButtons(sw, sh)
-  local fs = math.max(4, math.min(6, math.floor(sw / 180)))
+  local fs = math.max(2, math.floor((D.scale or 3) * 0.6 + 0.5))
   local bw = 4 * 8 * fs + 16
   local bh = 8 * fs + 8
   local by = 8
   D.uiButtons = {
-    { id = "layout", x = 8, y = by, w = bw, h = bh, fs = fs },
     { id = "full", x = sw - bw - 8, y = by, w = bw, h = bh, fs = fs },
   }
 end
@@ -159,6 +190,7 @@ end
 function D.finish(shake, bg)
   shake = shake or 0
   bg = bg or {}
+  love.graphics.pop()
   love.graphics.setCanvas()
   local sw, sh, s, x, y = D.syncLayout()
 
@@ -169,7 +201,8 @@ function D.finish(shake, bg)
   end
   D.shakeX, D.shakeY = jx, jy
 
-  -- Raiden-style vertical parallax: far < ground < clouds.
+  -- Raiden-style vertical parallax: far < ground < clouds. Drawn in window
+  -- space across the whole window, anchored to the playfield origin.
   love.graphics.clear(0.04, 0.06, 0.12, 1)
   local scroll = bg.scroll or 0
   local ground = bg.city or bg.mid
@@ -181,7 +214,7 @@ function D.finish(shake, bg)
 
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.setBlendMode("alpha", "premultiplied")
-  love.graphics.draw(D.canvas, x + jx, y + jy, 0, s, s)
+  love.graphics.draw(D.canvas, D.cx + jx, D.cy + jy, 0, s, s)
   love.graphics.setBlendMode("alpha")
 
   love.graphics.setColor(0, 0, 0, 0.07)
@@ -189,12 +222,17 @@ function D.finish(shake, bg)
     love.graphics.rectangle("fill", 0, lineY, sw, 1)
   end
 
-  D.placeButtons(sw, sh)
   return x, y, s, sw, sh
 end
 
+-- Playfield coords -> window coords.
 function D.toScreen(px, py)
   return D.ox + px * D.scaleX, D.oy + py * D.scaleY
+end
+
+-- Window coords -> playfield coords.
+function D.toGame(sx, sy)
+  return (sx - D.ox) / D.scaleX, (sy - D.oy) / D.scaleY
 end
 
 return D

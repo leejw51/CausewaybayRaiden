@@ -34,7 +34,6 @@ love love2d
 | X / Shift / K | Bomb |
 | C | Insert coin |
 | P / Esc | Pause |
-| Tab / L | Toggle vertical / horizontal layout |
 | F / F11 | Toggle window / fullscreen |
 | Up / Down | Choose EASY / NORMAL / HARD |
 
@@ -70,10 +69,13 @@ Other pickups:
 
 World 1 maps: Causeway Bay, MTR Line, HKU Campus.
 
-## Layout
+## Display
 
-- **Vertical** — portrait arcade cabinet (192×256 playfield)
-- **Horizontal** — landscape with side bezels
+The 192×256 playfield is drawn at a uniform pixel scale that fills the window
+height, and the visible width follows the window's shape: a 3:4 window shows
+exactly the playfield, a wide screen shows more of the same world on either
+side (and the ship can fly there). Nothing is stretched or letterboxed. `F`
+toggles fullscreen; the window is freely resizable.
 
 ## Build and release
 
