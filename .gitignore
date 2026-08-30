@@ -1,7 +1,7 @@
 .DS_Store
 *.love
-.tmp_save_test/
-verify_*.png
+# Build output: the .love archive, the embedded-LÖVE .app, and the zip.
+love2d/build/
 .cursor/
 *.swp
 *~

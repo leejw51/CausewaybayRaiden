@@ -1,0 +1,159 @@
+# CI — what `make check` runs, plus the packaging path, split so a failure
+# names itself.
+#
+# The game is the engine: loading a sprite needs a graphics context, so there
+# is no honest headless shortcut and the suite runs inside LÖVE. Linux is where
+# that is cheap — xvfb and llvmpipe give a real GL context on a machine with no
+# screen — so the tests live there, run twice: once from the checkout, and once
+# from the .love archive a release would ship. The second is the one that
+# catches a module or a sprite left out of the staging, which is a fault the
+# checkout can never show because the file is sitting right there.
+#
+# macOS then only has to prove the bundle wraps that archive correctly, which
+# is the part that has no Linux equivalent: the embedded runtime, the plist,
+# the icon, and the signature.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only, declared rather than inherited. Nothing here publishes anything —
+# release.yml is where write access belongs — and on a public repository an
+# undeclared block takes whatever the repository default happens to be, which
+# is not a thing to leave to a setting.
+permissions:
+  contents: read
+
+env:
+  LOVE_VERSION: "11.5"
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Cheap, and it is the number a tag will later be compared against.
+      - name: The version of record is well-formed
+        run: make version
+
+  test:
+    name: Test (LÖVE, headless)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Mesa's llvmpipe is what turns a runner with no GPU into one LÖVE will
+      # start on. xvfb supplies the X display SDL insists on before it will
+      # create a window at all.
+      - name: Install X and software GL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libgl1 libglx-mesa0 libgl1-mesa-dri libopenal1 luajit
+
+      # The AppImage rather than the distribution package: Ubuntu ships LÖVE
+      # 11.4, and conf.lua declares 11.5. A version mismatch makes LÖVE open a
+      # modal compatibility warning, which on a machine with nobody to click it
+      # is a hang rather than a failure.
+      #
+      # Extracted rather than mounted, because the runner has no FUSE.
+      - name: Install LÖVE ${{ env.LOVE_VERSION }}
+        run: |
+          url="https://github.com/love2d/love/releases/download/$LOVE_VERSION/love-$LOVE_VERSION-x86_64.AppImage"
+          curl -fsSL -o love.AppImage "$url"
+          chmod +x love.AppImage
+          ./love.AppImage --appimage-extract > /dev/null
+          # AppRun resolves the bundled libraries relative to APPDIR, and it is
+          # only guaranteed to infer that when launched as the AppImage. A
+          # wrapper sets it, so `love` means this build from anywhere.
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'export APPDIR="'"$PWD"'/squashfs-root"' \
+            'exec "$APPDIR/AppRun" "$@"' \
+            | sudo tee /usr/local/bin/love > /dev/null
+          sudo chmod +x /usr/local/bin/love
+          love --version
+
+      - name: Byte-compile every Lua file
+        run: make lint
+
+      # OpenAL has no device to open here and would abort startup rather than
+      # play nothing. The null backend is the one that always succeeds; the
+      # suite asserts about the synthesiser's numbers, not about audible sound.
+      - name: Run the suite
+        env:
+          ALSOFT_DRIVERS: "null"
+          SDL_AUDIODRIVER: dummy
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" make test
+
+      # The same suite, from the zip. This is what catches a staging mistake:
+      # a module or a sprite that exists in the checkout and not in the archive.
+      - name: Build the .love archive and run it
+        env:
+          ALSOFT_DRIVERS: "null"
+          SDL_AUDIODRIVER: dummy
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" make love-smoke
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CausewaybayRaiden-love
+          path: love2d/build/*.love
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    name: Package (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # No signing secrets on CI: `app-sign` falls back to ad-hoc, which is
+      # what a dry run wants. The question here is whether the bundle builds,
+      # is named and versioned correctly, and carries a valid signature —
+      # not whether it is notarised. release.yml does the real one.
+      #
+      # SKIP_SMOKE because a runner has no window server, and a smoke test that
+      # cannot open a window would fail for a reason that has nothing to do
+      # with the bundle. The test job above already ran the identical archive
+      # under xvfb, and `verify-archive` runs here too.
+      - name: Build and sign the .app
+        run: make -C love2d app SKIP_SMOKE=1
+
+      # Printed either way. "signed but not notarised" is the expected state
+      # for a CI build and the one worth seeing spelled out in a log.
+      - name: Assess with Gatekeeper
+        run: make -C love2d gatekeeper
+
+      # The bundle says what it is. A plist replacement that silently did
+      # nothing would otherwise ship as a game called "LÖVE" at version 11.5.
+      - name: The bundle is named and versioned
+        run: |
+          plist="love2d/build/CausewaybayRaiden.app/Contents/Info.plist"
+          version=$(make version)
+          for key in CFBundleName CFBundleIdentifier CFBundleShortVersionString; do
+            printf '  %-28s %s\n' "$key" "$(plutil -extract $key raw "$plist")"
+          done
+          test "$(plutil -extract CFBundleIdentifier raw "$plist")" = "com.causewaybay.raiden"
+          test "$(plutil -extract CFBundleShortVersionString raw "$plist")" = "$version"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CausewaybayRaiden-macos-unsigned
+          path: love2d/build/CausewaybayRaiden-macos.zip
+          if-no-files-found: error
+          retention-days: 7

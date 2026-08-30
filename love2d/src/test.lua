@@ -108,7 +108,12 @@ function M.run(assets, Audio, Display)
   check("jsonl encode is one object", type(line) == "string" and line:sub(1, 1) == "{")
   check("jsonl decode roundtrip", back and back.event == "clear" and back.stage == 2 and back.score == 12345)
 
-  local dir = (love.filesystem.getSource() or ".") .. "/.tmp_save_test"
+  -- The save directory, not the source directory. `getSource()` is the .love
+  -- archive itself once the game is packaged, and Save writes with plain
+  -- io.open, so a path inside a zip is a path nothing can be created at --
+  -- which is how these four checks passed from a checkout and failed from a
+  -- bundle. getSaveDirectory() is a real writable path in both cases.
+  local dir = (love.filesystem.getSaveDirectory() or ".") .. "/.tmp_save_test"
   Save.setDir(dir)
   os.remove(Save.path())
   Save.hiscore(88888)
