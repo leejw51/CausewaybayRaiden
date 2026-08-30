@@ -1,0 +1,7 @@
+.DS_Store
+*.love
+.tmp_save_test/
+verify_*.png
+.cursor/
+*.swp
+*~
