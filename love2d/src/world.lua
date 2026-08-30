@@ -1,6 +1,7 @@
 -- Shmup simulation: player, bugs, bullets, bombs, pickups, particles.
 
 local G = require "src.gfx"
+local Balance = require "src.balance"
 
 local World = {}
 World.__index = World
@@ -16,45 +17,46 @@ local function easeCos(t)
 end
 
 local DEFS = {
-  beetle   = { hp = 1, r = 8,  score = 100,  speed = 42, fire = 0,   w = 26, h = 26, img = "beetle" },
-  moth     = { hp = 1, r = 10, score = 300,  speed = 36, fire = 2.8, w = 32, h = 28, img = "moth" },
-  spider   = { hp = 3, r = 11, score = 500,  speed = 22, fire = 2.2, w = 30, h = 30, img = "spider" },
-  worm     = { hp = 3, r = 10, score = 400,  speed = 32, fire = 0,   w = 28, h = 32, img = "worm" },
-  nullptr  = { hp = 1, r = 9,  score = 250,  speed = 52, fire = 0,   w = 24, h = 24, img = "nullptr" },
-  leak     = { hp = 4, r = 12, score = 600,  speed = 18, fire = 1.4, w = 28, h = 28, img = "leak" },
-  overflow = { hp = 5, r = 13, score = 800, speed = 20, fire = 2.2, w = 30, h = 32, img = "overflow" },
-  deadlock = { hp = 6, r = 13, score = 700, speed = 16, fire = 1.8, w = 32, h = 24, img = "deadlock" },
-  heisen   = { hp = 2, r = 10, score = 450,  speed = 40, fire = 2.2, w = 32, h = 28, img = "moth" },
-  offby1   = { hp = 2, r = 10, score = 350,  speed = 42, fire = 2.0, w = 28, h = 26, img = "offby1" },
-  clippy   = { hp = 4, r = 12, score = 650,  speed = 20, fire = 2.4, w = 30, h = 30, img = "clippy" },
-  lifetime = { hp = 2, r = 10, score = 500,  speed = 30, fire = 2.0, w = 28, h = 32, img = "lifetime" },
-  infloop  = { hp = 5, r = 13, score = 750,  speed = 24, fire = 1.6, w = 32, h = 32, img = "infloop" },
-  panic    = { hp = 1, r = 11, score = 400,  speed = 58, fire = 0,   w = 28, h = 28, img = "panic" },
-  bossOverflow = { hp = 72, r = 32, score = 40000, speed = 14, fire = 0.9, w = 88, h = 88, img = "bossOverflow", boss = true, title = "STACK OVERFLOW" },
-  bossDeadlock = { hp = 96, r = 34, score = 55000, speed = 12, fire = 1.0, w = 90, h = 80, img = "bossDeadlock", boss = true, title = "THREAD DEADLOCK" },
-  boss     = { hp = 120, r = 36, score = 80000, speed = 14, fire = 0.85, w = 104, h = 92, img = "king", boss = true, title = "SEGFAULT" },
+  beetle   = { hp = 1, r = 8,  score = 100,  speed = 44, fire = 0,   w = 26, h = 26, img = "beetle" },
+  moth     = { hp = 2, r = 10, score = 300,  speed = 38, fire = 2.1, w = 32, h = 28, img = "moth" },
+  spider   = { hp = 5, r = 11, score = 500,  speed = 24, fire = 1.55, w = 30, h = 30, img = "spider" },
+  worm     = { hp = 4, r = 10, score = 400,  speed = 34, fire = 0,   w = 28, h = 32, img = "worm" },
+  nullptr  = { hp = 2, r = 9,  score = 250,  speed = 56, fire = 0,   w = 24, h = 24, img = "nullptr" },
+  leak     = { hp = 6, r = 12, score = 600,  speed = 20, fire = 1.05, w = 28, h = 28, img = "leak" },
+  overflow = { hp = 8, r = 13, score = 800, speed = 22, fire = 1.55, w = 30, h = 32, img = "overflow" },
+  deadlock = { hp = 9, r = 13, score = 700, speed = 18, fire = 1.25, w = 32, h = 24, img = "deadlock" },
+  heisen   = { hp = 3, r = 10, score = 450,  speed = 42, fire = 1.7, w = 32, h = 28, img = "moth" },
+  offby1   = { hp = 3, r = 10, score = 350,  speed = 44, fire = 1.55, w = 28, h = 26, img = "offby1" },
+  clippy   = { hp = 6, r = 12, score = 650,  speed = 22, fire = 1.8, w = 30, h = 30, img = "clippy" },
+  lifetime = { hp = 3, r = 10, score = 500,  speed = 32, fire = 1.55, w = 28, h = 32, img = "lifetime" },
+  infloop  = { hp = 8, r = 13, score = 750,  speed = 26, fire = 1.2, w = 32, h = 32, img = "infloop" },
+  panic    = { hp = 1, r = 11, score = 400,  speed = 62, fire = 0,   w = 28, h = 28, img = "panic" },
+  bossOverflow = { hp = 420, r = 32, score = 40000, speed = 14, fire = 0.9, w = 88, h = 88, img = "bossOverflow", boss = true, title = "STACK OVERFLOW" },
+  bossDeadlock = { hp = 560, r = 34, score = 55000, speed = 12, fire = 1.0, w = 90, h = 80, img = "bossDeadlock", boss = true, title = "THREAD DEADLOCK" },
+  boss     = { hp = 720, r = 36, score = 80000, speed = 14, fire = 0.85, w = 104, h = 92, img = "king", boss = true, title = "SEGFAULT" },
 }
 
 -- Claude yellow (aim), Grok red (wild), Codex green (code).
 -- Tokens burn like a vibe-coding budget: when they hit 0, the agent leaves.
+-- Agents are shields first: wide eat radius, slow weak shots.
 local AGENT_DEFS = {
   {
     id = "claude", name = "CLAUDE", img = "claude", tag = "C",
-    rate = 0.32, col = { 0.95, 0.84, 0.18 },
-    tokenMax = 22, drain = 0.55, shotCost = 0.08,
-    orbit = 20, spin = 2.1, eatR = 18,
+    rate = 1.25, col = { 0.95, 0.84, 0.18 },
+    tokenMax = 22, drain = 0.40, shotCost = 0.04,
+    orbit = 22, spin = 2.1, eatR = 30,
   },
   {
     id = "grok", name = "GROK", img = "grok", tag = "G",
-    rate = 0.15, col = { 0.95, 0.22, 0.22 },
-    tokenMax = 18, drain = 0.7, shotCost = 0.05,
-    orbit = 34, spin = 4.4, eatR = 21,
+    rate = 1.05, col = { 0.95, 0.22, 0.22 },
+    tokenMax = 18, drain = 0.45, shotCost = 0.03,
+    orbit = 36, spin = 4.4, eatR = 38,
   },
   {
     id = "codex", name = "CODEX", img = "codex", tag = "X",
-    rate = 0.09, col = { 0.22, 0.88, 0.34 },
-    tokenMax = 20, drain = 0.6, shotCost = 0.04,
-    orbit = 16, spin = 1.5, eatR = 16,
+    rate = 1.15, col = { 0.22, 0.88, 0.34 },
+    tokenMax = 20, drain = 0.42, shotCost = 0.03,
+    orbit = 14, spin = 1.5, eatR = 28,
   },
 }
 
@@ -84,29 +86,46 @@ local STREET_SHOPS = { "hysan", "market", "ramen", "dimsum", "bakery", "coffee",
 
 local SKILL_NAME = { "PRINTLN", "TRAIT", "ASYNC", "TOKIO" }
 
-function World.new(assets, audio, hiscore, stage)
+function World.new(assets, audio, hiscore, stage, diff)
   local w = setmetatable({
     assets = assets,
     audio = audio,
     hiscore = hiscore or 50000,
     stage = stage or 1,
+    difficulty = Balance.normalize(diff),
   }, World)
   w:reset(1)
   return w
 end
 
+function World:applyRank()
+  local bal = Balance.get(self.difficulty)
+  self.hpMul = bal.hpMul + (self.loop - 1) * 0.18 + (self.stage - 1) * 0.06
+  self.spdMul = bal.spdMul + (self.loop - 1) * 0.08 + (self.stage - 1) * 0.03
+  self.fireRateMul = bal.fireRateMul
+  self.bulletSpdMul = bal.bulletSpdMul
+  self.bossHpMul = bal.bossHpMul
+  self.agentDmgMul = bal.agentDmgMul
+  self.agentRateMul = bal.agentRateMul
+  self.agentEatMul = bal.agentEatMul
+  self.agentAutoFire = bal.agentAutoFire and true or false
+  self.tokenRainEmpty = bal.tokenRainEmpty
+  self.tokenRainBusy = bal.tokenRainBusy
+  return bal
+end
+
 function World:reset(loop)
   self.loop = loop or 1
   self.stage = self.stage or 1
-  self.hpMul = 0.85 + (self.loop - 1) * 0.18 + (self.stage - 1) * 0.06
-  self.spdMul = 0.85 + (self.loop - 1) * 0.08 + (self.stage - 1) * 0.03
+  self.difficulty = Balance.normalize(self.difficulty)
+  local bal = self:applyRank()
   self.time = 0
   self.score = self.score or 0
   if loop == 1 then
     self.score = 0
-    self.lives = 5
-    self.bombs = 5
-    self.power = 2
+    self.lives = bal.lives
+    self.bombs = bal.bombs
+    self.power = bal.power
     self.extendAt = 30000
     self.agents = {}
     self.stage = self.stage or 1
@@ -204,8 +223,7 @@ function World:advanceStage()
   self.readyT = 2.0
   self.phaseName = ""
   self.player.inv = math.max(self.player.inv, 1.8)
-  self.hpMul = 0.85 + (self.loop - 1) * 0.18 + (self.stage - 1) * 0.06
-  self.spdMul = 0.85 + (self.loop - 1) * 0.08 + (self.stage - 1) * 0.03
+  self:applyRank()
   local Stage = require "src.stage"
   self.script = Stage.build(self.stage, self.loop)
 end
@@ -252,10 +270,17 @@ end
 function World:spawn(kind, x, y, opts)
   opts = opts or {}
   local d = DEFS[kind]
+  local hp
+  if d.boss then
+    local loopB = 1 + ((self.loop or 1) - 1) * 0.22
+    hp = math.max(1, math.floor(d.hp * (self.bossHpMul or 1) * loopB))
+  else
+    hp = math.max(1, math.floor(d.hp * (opts.hpMul or self.hpMul)))
+  end
   local e = {
     kind = kind,
     x = x, y = y, x0 = x, y0 = y,
-    hp = math.max(1, math.floor(d.hp * (opts.hpMul or self.hpMul))),
+    hp = hp,
     r = d.r,
     score = d.score,
     t = 0,
@@ -272,12 +297,13 @@ function World:spawn(kind, x, y, opts)
     boss = d.boss or kind == "boss",
     bossTitle = d.title,
     midboss = opts.midboss,
-    midboss = opts.midboss,
     phase = 1,
     pt = 0,
     dead = false,
     id = self.nextId,
     visible = true,
+    hpFlash = 0,
+    hpShow = 0,
   }
   if opts.midboss then
     e.hp = math.floor(d.hp * (opts.hpMul or self.hpMul) * 8)
@@ -581,8 +607,8 @@ function World:recruitAgent(opts)
     id = def.id, name = def.name, img = def.img, rate = def.rate, col = def.col,
     tag = def.tag, tokenMax = def.tokenMax, drain = def.drain, shotCost = def.shotCost,
     orbit = def.orbit, spin = def.spin,
-    x = px, y = py, fireT = 0.18,
-    eatR = def.eatR, chomp = 0.35, eaten = 0,
+    x = px, y = py, fireT = 0.45,
+    eatR = def.eatR * (self.agentEatMul or 1), chomp = 0.35, eaten = 0,
     pop = opts.quiet and 1 or 0,
     tokens = def.tokenMax,
     lowWarn = false,
@@ -653,29 +679,66 @@ function World:startRecruitFX(name, col, x, y)
   self:popRing(x, y, G.palette.white, 0.32)
 end
 
+function World:nearestThreatBullet(ag, maxD)
+  maxD = maxD or 80
+  local p = self.player
+  local best, bd = nil, nil
+  for _, b in ipairs(self.ebullets) do
+    if dist2(b.x, b.y, p.x, p.y) <= maxD * maxD then
+      local d = dist2(b.x, b.y, ag.x, ag.y)
+      if not bd or d < bd then
+        best, bd = b, d
+      end
+    end
+  end
+  return best
+end
+
+function World:agentShouldShoot(ag)
+  if self.agentAutoFire then
+    return true
+  end
+  local r = (ag.eatR or 28) * 2.2
+  local r2 = r * r
+  for _, b in ipairs(self.ebullets) do
+    if dist2(b.x, b.y, ag.x, ag.y) <= r2 then
+      return false
+    end
+  end
+  return true
+end
+
 function World:agentShoot(ag)
+  local dmgMul = self.agentDmgMul or 0.4
+  local auto = self.agentAutoFire
   if ag.id == "claude" then
-    -- Yellow: one hard lock-on shot
     local t = self:nearestEnemy(ag.x, ag.y)
     local a = t and math.atan2(t.y - ag.y, t.x - ag.x) or -math.pi / 2
-    local spd = 280
-    self:pshot(ag.x, ag.y, math.cos(a) * spd, math.sin(a) * spd, 1.15, { col = ag.col, agent = true, r = 3 })
+    local spd = auto and 280 or 260
+    local dmg = (auto and 1.15 or 0.5) * dmgMul
+    self:pshot(ag.x, ag.y, math.cos(a) * spd, math.sin(a) * spd, dmg, { col = ag.col, agent = true, r = 3 })
     self:spark(ag.x, ag.y, math.cos(a) * 40, math.sin(a) * 40, ag.col, 0.18, 2, "glint")
   elseif ag.id == "grok" then
-    -- Red: wild 5-way burst
-    local wob = math.sin(self.time * 11) * 28
-    self:pshot(ag.x, ag.y, wob - 90, -240, 0.55, { col = ag.col, agent = true })
-    self:pshot(ag.x, ag.y, wob - 40, -265, 0.55, { col = ag.col, agent = true })
-    self:pshot(ag.x, ag.y, wob, -285, 0.7, { col = ag.col, agent = true })
-    self:pshot(ag.x, ag.y, wob + 40, -265, 0.55, { col = ag.col, agent = true })
-    self:pshot(ag.x, ag.y, wob + 90, -240, 0.55, { col = ag.col, agent = true })
+    local wob = math.sin(self.time * 11) * (auto and 28 or 36)
+    if auto then
+      self:pshot(ag.x, ag.y, wob - 90, -240, 0.55 * dmgMul, { col = ag.col, agent = true })
+      self:pshot(ag.x, ag.y, wob - 40, -265, 0.55 * dmgMul, { col = ag.col, agent = true })
+      self:pshot(ag.x, ag.y, wob, -285, 0.7 * dmgMul, { col = ag.col, agent = true })
+      self:pshot(ag.x, ag.y, wob + 40, -265, 0.55 * dmgMul, { col = ag.col, agent = true })
+      self:pshot(ag.x, ag.y, wob + 90, -240, 0.55 * dmgMul, { col = ag.col, agent = true })
+    else
+      self:pshot(ag.x, ag.y, wob, -250, 0.4 * dmgMul, { col = ag.col, agent = true })
+    end
   elseif ag.id == "codex" then
-    -- Green: tight dual compile streams
-    self:pshot(ag.x - 4, ag.y, 0, -300, 0.5, { col = ag.col, agent = true, r = 2 })
-    self:pshot(ag.x + 4, ag.y, 0, -300, 0.5, { col = ag.col, agent = true, r = 2 })
-    if math.floor(self.time * 8) % 2 == 0 then
-      self:pshot(ag.x, ag.y, -18, -290, 0.4, { col = ag.col, agent = true, r = 2 })
-      self:pshot(ag.x, ag.y, 18, -290, 0.4, { col = ag.col, agent = true, r = 2 })
+    if auto then
+      self:pshot(ag.x - 4, ag.y, 0, -300, 0.5 * dmgMul, { col = ag.col, agent = true, r = 2 })
+      self:pshot(ag.x + 4, ag.y, 0, -300, 0.5 * dmgMul, { col = ag.col, agent = true, r = 2 })
+      if math.floor(self.time * 8) % 2 == 0 then
+        self:pshot(ag.x, ag.y, -18, -290, 0.4 * dmgMul, { col = ag.col, agent = true, r = 2 })
+        self:pshot(ag.x, ag.y, 18, -290, 0.4 * dmgMul, { col = ag.col, agent = true, r = 2 })
+      end
+    else
+      self:pshot(ag.x, ag.y, 0, -280, 0.35 * dmgMul, { col = ag.col, agent = true, r = 2 })
     end
   end
 end
@@ -691,17 +754,27 @@ function World:updateAgents(dt)
     local tx, ty
     if ag.id == "codex" then
       tx = p.x
-      ty = p.y + 20
+      ty = p.y - 22
     elseif ag.id == "grok" then
       local ang = self.time * spin + i * 2.2
       tx = p.x + math.cos(ang) * orbit
-      ty = p.y + math.sin(ang * 1.4) * 16
+      ty = p.y - 18 + math.sin(ang * 1.4) * 10
     else
       local ang = self.time * spin + (i - 1) * (math.pi * 2 / math.max(1, n))
       tx = p.x + math.cos(ang) * orbit
-      ty = p.y + math.sin(ang) * 12
+      ty = p.y - 16 + math.sin(ang) * 8
     end
-    local follow = ag.id == "grok" and 14 or 9
+    local threat = self:nearestThreatBullet(ag, 86)
+    if threat then
+      tx = tx + (threat.x - tx) * 0.62
+      ty = ty + (threat.y - ty) * 0.62
+    end
+    tx = math.max(12, math.min(180, tx))
+    ty = math.max(18, math.min(236, ty))
+    local follow = ag.id == "grok" and 16 or 11
+    if threat then
+      follow = follow + 6
+    end
     ag.x = ag.x + (tx - ag.x) * math.min(1, dt * follow)
     ag.y = ag.y + (ty - ag.y) * math.min(1, dt * follow)
     ag.chomp = math.max(0, (ag.chomp or 0) - dt)
@@ -721,11 +794,19 @@ function World:updateAgents(dt)
       self:spark(ag.x, ag.y, (love.math.random() - 0.5) * 28, (love.math.random() - 0.5) * 28, ag.col, 0.2, 1.6, "glint")
     end
     if working then
-      ag.fireT = ag.fireT - dt * (boosted and 1.7 or 1)
+      local fireMul = 1
+      if self.agentAutoFire then
+        fireMul = boosted and 1.7 or 1
+      end
+      ag.fireT = ag.fireT - dt * fireMul
       if ag.fireT <= 0 then
-        ag.fireT = ag.rate
-        self:agentShoot(ag)
-        ag.tokens = (ag.tokens or 0) - (ag.shotCost or 0.1)
+        ag.fireT = ag.rate * (self.agentRateMul or 1)
+        if self:agentShouldShoot(ag) then
+          self:agentShoot(ag)
+          ag.tokens = (ag.tokens or 0) - (ag.shotCost or 0.1)
+        else
+          ag.fireT = math.min(ag.fireT, 0.28)
+        end
       end
     end
     if (ag.tokens or 0) <= 0 then
@@ -913,6 +994,9 @@ end
 
 function World:updateEnemy(e, dt)
   e.t = e.t + dt
+  e.flash = math.max(0, (e.flash or 0) - dt)
+  e.hpFlash = math.max(0, (e.hpFlash or 0) - dt)
+  e.hpShow = math.max(0, (e.hpShow or 0) - dt)
   local pth = e.path
   if pth == "down" then
     e.y = e.y + e.speed * dt
@@ -979,10 +1063,10 @@ function World:updateEnemy(e, dt)
   end
 
   if e.fire and e.fire > 0 and e.y > 8 and e.y < 190 and not e.boss then
-    e.fireT = e.fireT - dt
+    e.fireT = e.fireT - dt * (self.fireRateMul or 1)
     if e.fireT <= 0 then
       e.fireT = e.fire * (0.85 + love.math.random() * 0.3)
-      local spd = 46 + self.loop * 4
+      local spd = (48 + self.loop * 5) * (self.bulletSpdMul or 1)
       if e.kind == "moth" then
         self:aimed(e.x, e.y + 8, 1, 0, spd)
       elseif e.kind == "spider" then
@@ -1026,6 +1110,9 @@ end
 function World:updateBoss(e, dt)
   e.pt = e.pt + dt
   e.t = e.t + dt
+  e.flash = math.max(0, (e.flash or 0) - dt)
+  e.hpFlash = math.max(0, (e.hpFlash or 0) - dt)
+  e.hpShow = math.max(0, (e.hpShow or 0) - dt)
   if e.y < 48 then
     e.y = e.y + 26 * dt
     self.phaseName = e.bossTitle or "BOSS"
@@ -1061,8 +1148,8 @@ function World:updateBoss(e, dt)
 
   local sway = 28 + phase * 8
   e.x = 96 + math.sin(e.t * (0.5 + phase * 0.1)) * sway
-  e.fireT = e.fireT - dt
-  local spd = 38 + self.loop * 4 + phase * 2 + (self.stage - 1) * 2
+  e.fireT = e.fireT - dt * (self.fireRateMul or 1)
+  local spd = (40 + self.loop * 5 + phase * 3 + (self.stage - 1) * 3) * (self.bulletSpdMul or 1)
 
   if e.kind == "bossOverflow" then
     if phase == 1 and e.fireT <= 0 then
@@ -1249,7 +1336,7 @@ function World:update(dt, input)
 
   -- Shining agent objects sit on the scrolling map.
   self.tokenRainT = (self.tokenRainT or 0) + dt
-  local rainGap = (#self.agents == 0) and 4.2 or 7.2
+  local rainGap = (#self.agents == 0) and (self.tokenRainEmpty or 6.4) or (self.tokenRainBusy or 10.5)
   if self.readyT <= 0 and not self.over and not self.clear
       and self:countTokenPickups() < 2 and self.tokenRainT >= rainGap then
     self.tokenRainT = 0
@@ -1438,7 +1525,11 @@ function World:update(dt, input)
           e.flash = 0.1
           self:burst(b.x, b.y, 3, b.col or G.palette.cyan, 50)
           self.audio.play("hit")
-          if e.boss then self.shake = math.max(self.shake, 1.5) end
+          if e.boss then
+            e.hpFlash = 0.22
+            e.hpShow = 1.8
+            self.shake = math.max(self.shake, 1.8)
+          end
           if e.hp <= 0 then
             self.hitstop = 0.03
             if b.agent then
@@ -1646,6 +1737,24 @@ function World:draw()
         love.graphics.setColor(t[1], t[2], t[3], t[4])
       end
       love.graphics.draw(img, math.floor(e.x), math.floor(e.y), rot, 1, 1, ox, oy)
+      if (e.boss or e.midboss) and (e.maxhp or 0) > 0 then
+        local bw = e.boss and 56 or 36
+        local bh = e.boss and 5 or 3
+        local bx = math.floor(e.x - bw / 2)
+        local by = math.floor(e.y - oy - 8)
+        local u = math.max(0, math.min(1, e.hp / e.maxhp))
+        love.graphics.setColor(0, 0, 0, 0.8)
+        love.graphics.rectangle("fill", bx - 1, by - 1, bw + 2, bh + 2)
+        love.graphics.setColor(G.palette.dred)
+        love.graphics.rectangle("fill", bx, by, bw * u, bh)
+        if (e.hpFlash or 0) > 0 then
+          love.graphics.setColor(1, 1, 1, 0.75)
+          love.graphics.rectangle("fill", bx, by, bw * u, bh)
+        else
+          love.graphics.setColor(G.palette.yellow)
+          love.graphics.rectangle("fill", bx, by, bw * u, 2)
+        end
+      end
     end
   end
 
@@ -1906,19 +2015,29 @@ function World:draw()
     love.graphics.setColor(G.palette.yellow)
     love.graphics.rectangle("fill", barX, 16, barW * u, 2)
     G.print("OVERFLOW", barX, 24, G.palette.yellow, 1)
+    local mhp = tostring(math.ceil(midboss.hp)) .. "/" .. tostring(math.ceil(midboss.maxhp or midboss.hp))
+    G.print(mhp, barX + barW - G.textWidth(mhp, 1), 24, G.palette.white, 1)
   end
 
   -- Boss HP
   if self.boss and not self.boss.dead then
-    local maxhp = self.boss.maxhp or (DEFS.boss.hp * self.hpMul)
-    local u = math.max(0, self.boss.hp / maxhp)
+    local maxhp = math.max(1, self.boss.maxhp or self.boss.hp)
+    local hp = math.max(0, self.boss.hp)
+    local u = math.max(0, hp / maxhp)
     love.graphics.setColor(G.palette.black)
-    love.graphics.rectangle("fill", barX, 16, barW, 7)
-    love.graphics.setColor(G.palette.dred)
-    love.graphics.rectangle("fill", barX, 16, barW * u, 7)
+    love.graphics.rectangle("fill", barX, 16, barW, 8)
+    if (self.boss.hpFlash or 0) > 0 then
+      love.graphics.setColor(1, 1, 1, 0.9)
+    else
+      love.graphics.setColor(G.palette.dred)
+    end
+    love.graphics.rectangle("fill", barX, 16, barW * u, 8)
     love.graphics.setColor(G.palette.yellow)
     love.graphics.rectangle("fill", barX, 16, barW * u, 2)
-    G.print((self.boss.bossTitle or "BOSS"):sub(1, 12), barX, 26, G.palette.lred, 1)
+    local title = (self.boss.bossTitle or "BOSS"):sub(1, 12)
+    G.print(title, barX, 26, G.palette.lred, 1)
+    local hpTxt = tostring(math.ceil(hp)) .. "/" .. tostring(math.ceil(maxhp))
+    G.print(hpTxt, barX + barW - G.textWidth(hpTxt, 1), 26, G.palette.white, 1)
     if self.phaseName ~= "" then
       G.print(self.phaseName, barX, 36, G.palette.yellow, 1)
     end

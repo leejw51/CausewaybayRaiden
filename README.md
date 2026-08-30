@@ -36,8 +36,11 @@ love love2d
 | P / Esc | Pause |
 | Tab / L | Toggle vertical / horizontal layout |
 | F / F11 | Toggle window / fullscreen |
+| Up / Down | Choose EASY / NORMAL / HARD |
 
 Hold shot to focus (move slower). The tiny cyan pixel is your hitbox.
+
+After you pick a stage, choose a rank. **NORMAL** is the intended fight. AI agents mostly block enemy bullets. Bosses show HP when you hit them.
 
 ## How to play
 

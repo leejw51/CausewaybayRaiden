@@ -7,6 +7,7 @@ local Audio = require "src.audio"
 local World = require "src.world"
 local Stage = require "src.stage"
 local Save = require "src.save"
+local Balance = require "src.balance"
 
 local assets
 local world
@@ -31,8 +32,16 @@ local STORY_DWELL = 3.4
 local STORY_SLIDE = 0.7
 local mapCursor = 1
 local mapPx, mapPy = 36, 168
+local diffCursor = Balance.index(Balance.DEFAULT)
+local difficulty = Balance.DEFAULT
 local verify = false
 local verifyStep = 0
+
+local DIFF_OPTS = {
+  { id = "easy", title = "EASY", sub = "TRAINING BUILD" },
+  { id = "normal", title = "NORMAL", sub = "RELEASE BUILD" },
+  { id = "hard", title = "HARD", sub = "DEBUG HELL" },
+}
 
 local MAP = {
   { x = 36, y = 176, stage = 1, tag = "1-1", title = "CAUSEWAYBAY", boss = "OVERFLOW" },
@@ -110,16 +119,24 @@ local function readMove()
   }
 end
 
-local function startGame(stage)
+local function startGame(stage, diff)
   demo = false
   stage = stage or (MAP[mapCursor] and MAP[mapCursor].stage) or 1
-  world = World.new(assets, Audio, hiscore, stage)
+  difficulty = Balance.normalize(diff or DIFF_OPTS[diffCursor].id)
+  diffCursor = Balance.index(difficulty)
+  world = World.new(assets, Audio, hiscore, stage, difficulty)
   world.script = Stage.build(world.stage, 1)
   state = "play"
   stateT = 0
   Save.play(world.stage)
   Audio.play("start")
   Audio.music("stage")
+end
+
+local function startDiff()
+  state = "diff"
+  stateT = 0
+  Audio.play("select")
 end
 
 local function easeCos(t)
@@ -165,7 +182,7 @@ end
 
 local function startDemo()
   demo = true
-  world = World.new(assets, Audio, hiscore)
+  world = World.new(assets, Audio, hiscore, 1, "easy")
   world.script = Stage.build(1, 1)
   world.lives = 99
   world.readyT = 0
@@ -315,14 +332,26 @@ function love.keypressed(k)
       Save.map(mapCursor)
       Audio.play("select")
     elseif k == "return" or k == "kpenter" or k == "z" or k == "space" then
-      if credits > 0 then
-        credits = math.max(0, credits - 1)
-      end
-      startGame(MAP[mapCursor].stage)
+      startDiff()
     elseif k == "escape" then
       state = "title"
       stateT = 0
       Audio.music("title")
+    end
+  elseif state == "diff" then
+    if k == "up" or k == "w" or k == "left" or k == "a" then
+      diffCursor = diffCursor <= 1 and #DIFF_OPTS or (diffCursor - 1)
+      Audio.play("select")
+    elseif k == "down" or k == "s" or k == "right" or k == "d" then
+      diffCursor = diffCursor >= #DIFF_OPTS and 1 or (diffCursor + 1)
+      Audio.play("select")
+    elseif k == "return" or k == "kpenter" or k == "z" or k == "space" then
+      if credits > 0 then
+        credits = math.max(0, credits - 1)
+      end
+      startGame(MAP[mapCursor].stage, DIFF_OPTS[diffCursor].id)
+    elseif k == "escape" then
+      startMap()
     end
   elseif state == "ending" then
     if k == "return" or k == "z" or k == "space" or k == "escape" then
@@ -364,8 +393,9 @@ function love.keypressed(k)
       if credits > 0 then
         credits = credits - 1
         world.over = false
-        world.lives = 5
-        world.bombs = 5
+        local kit = Balance.get(world.difficulty)
+        world.lives = kit.lives
+        world.bombs = kit.bombs
         world.player.alive = true
         world.player.x, world.player.y = 96, 220
         world.player.inv = 2.5
@@ -425,6 +455,10 @@ function love.update(dt)
     local n = MAP[mapCursor] or MAP[1]
     mapPx = mapPx + (n.x - mapPx) * math.min(1, dt * 8)
     mapPy = mapPy + (n.y - mapPy) * math.min(1, dt * 8)
+    return
+  end
+
+  if state == "diff" then
     return
   end
 
@@ -644,7 +678,36 @@ local function drawMap()
   local n = MAP[mapCursor] or MAP[1]
   G.center(n.tag .. "  " .. n.title, 218, G.palette.cyan, 1)
   G.center("BOSS " .. n.boss, 232, G.palette.rust, 1)
-  G.center(progress.cleared[n.stage] and "CLEARED" or "SPACE PLAY", 244, G.palette.yellow, 1)
+  G.center(progress.cleared[n.stage] and "CLEARED" or "SPACE RANK", 244, G.palette.yellow, 1)
+end
+
+local function drawDiff()
+  love.graphics.clear(0, 0, 0, 0)
+  if assets.worldMap then
+    love.graphics.setColor(1, 1, 1, 0.35)
+    love.graphics.draw(assets.worldMap, 0, 0)
+  end
+  love.graphics.setColor(0.03, 0.02, 0.10, 0.78)
+  love.graphics.rectangle("fill", 0, 0, 192, 256)
+  G.center("LEVEL", 36, G.palette.yellow, 2)
+  G.center("CHOOSE RANK", 62, G.palette.cyan, 1)
+  local n = MAP[mapCursor] or MAP[1]
+  G.center(n.tag .. "  " .. n.title, 78, G.palette.white, 1)
+  local flash = math.floor(blink * 8) % 2 == 0
+  for i, d in ipairs(DIFF_OPTS) do
+    local on = i == diffCursor
+    local y = 102 + (i - 1) * 32
+    if on then
+      love.graphics.setColor(0.86, 0.40, 0.27, 0.35)
+      love.graphics.rectangle("fill", 24, y - 4, 144, 28)
+      G.center("> " .. d.title .. " <", y, flash and G.palette.yellow or G.palette.white, 1)
+      G.center(d.sub, y + 12, G.palette.cyan, 1)
+    else
+      G.center(d.title, y + 4, G.palette.gray, 1)
+    end
+  end
+  G.center("SPACE START", 214, flash and G.palette.yellow or G.palette.white, 1)
+  G.center("ESC MAP", 230, G.palette.magenta, 1)
 end
 
 local function drawStoryPage(page, ox)
@@ -711,6 +774,9 @@ local function drawPause()
   G.center("ARROWS MOVE", 154, G.palette.white, 1)
   G.center("P ESC RESUME", 176, G.palette.white, 1)
   G.center("F FULLSCREEN", 190, G.palette.magenta, 1)
+  if world then
+    G.center(Balance.label(world.difficulty), 210, G.palette.cyan, 1)
+  end
 end
 
 local function drawContinue()
@@ -794,6 +860,8 @@ function love.draw()
     drawStory()
   elseif state == "map" then
     drawMap()
+  elseif state == "diff" then
+    drawDiff()
   elseif state == "ending" then
     drawEnding()
   elseif state == "play" or state == "pause" or state == "continue" or state == "gameover" then
@@ -811,9 +879,9 @@ function love.draw()
     if state == "gameover" then drawGameover() end
   end
 
-  local shake = (world and state ~= "title" and state ~= "boot" and state ~= "story" and state ~= "ending" and state ~= "map") and world.shake or 0
+  local shake = (world and state ~= "title" and state ~= "boot" and state ~= "story" and state ~= "ending" and state ~= "map" and state ~= "diff") and world.shake or 0
   local scroll = titleScroll
-  if world and state ~= "title" and state ~= "boot" and state ~= "story" and state ~= "ending" and state ~= "map" then
+  if world and state ~= "title" and state ~= "boot" and state ~= "story" and state ~= "ending" and state ~= "map" and state ~= "diff" then
     scroll = world.bgY or 0
   end
   local map = assets.bgApt or assets.bg
@@ -821,7 +889,7 @@ function love.draw()
   local st = world and world.stage or 1
   if state == "story" then
     st = storyPage
-  elseif state == "map" then
+  elseif state == "map" or state == "diff" then
     st = mapCursor
   elseif state == "ending" then
     st = 3
@@ -884,7 +952,7 @@ local function wcenter(str, y, col, fs, sw)
 end
 
 function drawTitleHud(sw, sh)
-  if state ~= "title" and state ~= "story" and state ~= "ending" and state ~= "map" then
+  if state ~= "title" and state ~= "story" and state ~= "ending" and state ~= "map" and state ~= "diff" then
     return
   end
   local startMsg, lines
@@ -892,8 +960,11 @@ function drawTitleHud(sw, sh)
     startMsg = "SPACE FOR MAP"
     lines = { startMsg, "LEFT RIGHT PAGE" }
   elseif state == "map" then
-    startMsg = "SPACE PLAY"
+    startMsg = "SPACE RANK"
     lines = { startMsg, "LEFT RIGHT MOVE", "ESC TITLE" }
+  elseif state == "diff" then
+    startMsg = "SPACE START"
+    lines = { startMsg, "UP DOWN RANK", "ESC MAP" }
   elseif state == "ending" then
     startMsg = "SPACE TITLE"
     lines = { startMsg, "PRINCESS PITCH", "HKU BURGER CLEAR", "HONG KONG 2026" }
@@ -939,6 +1010,33 @@ function drawPlayHud(sw, sh)
   G.print(hi, sw - pad - G.textWidth(hi, fs), top, G.palette.yellow, fs)
   local sk = SKILLS[world.power] or "PRINTLN"
   G.print(sk, pad, top + 9 * fs, G.palette.cyan, fs)
+  local rank = Balance.label(world.difficulty)
+  G.print(rank, sw - pad - G.textWidth(rank, fs), top + 9 * fs, G.palette.rust, fs)
+
+  if world.boss and not world.boss.dead then
+    local maxhp = math.max(1, world.boss.maxhp or world.boss.hp)
+    local hp = math.max(0, world.boss.hp)
+    local u = hp / maxhp
+    local barW = math.floor(sw * 0.46)
+    local barH = math.max(8, math.floor(fs * 1.15))
+    local bx = math.floor((sw - barW) / 2)
+    local by = top + 19 * fs
+    love.graphics.setColor(0, 0, 0, 0.72)
+    love.graphics.rectangle("fill", bx - 4, by - 4, barW + 8, barH + 10 * fs)
+    if (world.boss.hpFlash or 0) > 0 then
+      love.graphics.setColor(1, 1, 1, 0.95)
+    else
+      love.graphics.setColor(G.palette.dred)
+    end
+    love.graphics.rectangle("fill", bx, by, barW * u, barH)
+    love.graphics.setColor(G.palette.yellow)
+    love.graphics.rectangle("line", bx, by, barW, barH)
+    local title = world.boss.bossTitle or "BOSS"
+    local hpTxt = string.format("%d/%d", math.ceil(hp), math.ceil(maxhp))
+    local tfs = math.max(4, math.floor(fs * 0.7))
+    G.printShadow(title, bx, by + barH + 2, G.palette.lred, tfs)
+    G.printShadow(hpTxt, bx + barW - G.textWidth(hpTxt, tfs), by + barH + 2, G.palette.white, tfs)
+  end
 
   local bot = sh - 10 * fs - 10
   local lifeSc = fs * 0.12
