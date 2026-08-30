@@ -1,0 +1,262 @@
+# Release — build CAUSEWAYBAY RAIDEN for macOS, sign it, notarise it, and
+# attach it to a GitHub release.
+#
+# Triggered by pushing a tag like `v0.1.0`, which must match the version of
+# record in ./VERSION. Or manually via workflow_dispatch for a dry run that
+# uploads the artifacts without creating a release.
+#
+#   macos-latest  → CausewaybayRaiden-<version>-<arch>-apple-darwin.zip
+#                   a double-clickable .app with LÖVE 11.5 inside, signed,
+#                   notarised and stapled
+#   ubuntu-24.04  → CausewaybayRaiden-<version>.love
+#                   the portable archive, for anyone who already has LÖVE
+#
+# `make -C love2d app` is the whole recipe and it is the same one a laptop
+# runs: LÖVE is downloaded and embedded, the icon is built from the ship
+# sprite, and the bundle is signed inside-out under the hardened runtime.
+# Everything this file adds is credentials and plumbing.
+#
+# Signing uses the Developer ID certificate from the repository secrets
+# (MACOS_CERTIFICATE_P12_BASE64 / MACOS_CERTIFICATE_PASSWORD) and notarisation
+# uses APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / TEAM_ID. Without the secrets
+# everything falls back to ad-hoc signing, so a fork's dry run still builds.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  LOVE_VERSION: "11.5"
+
+jobs:
+  # ------------------------------------------------------------- the macOS app
+  #
+  # Notarising is what makes the difference between a bundle that opens and one
+  # that shows "Apple could not verify…". A Developer ID signature with the
+  # hardened runtime is necessary and not sufficient — since macOS 10.15
+  # anything distributed outside the App Store must be notarised too, and
+  # `spctl` asked the way Finder asks will say so.
+  app:
+    name: Package the macOS app
+    runs-on: macos-latest
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      arch: ${{ steps.version.outputs.arch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A tag that disagrees with the version of record is a mistake worth
+      # stopping for, not shipping. `make version` also fails outright on a
+      # malformed number, so this settles both questions at once.
+      - name: Resolve the version
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(make version)
+          if [ "${{ github.ref_type }}" = "tag" ] && [ "${TAG#v}" != "$version" ]; then
+            echo "tag $TAG does not match the version of record $version" >&2
+            echo "bump ./VERSION, or retag" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
+
+      # Imports the Developer ID certificate into a throwaway keychain and
+      # exports APPLE_SIGNING_IDENTITY for the build. Falls back to ad-hoc
+      # signing when the secret is absent (e.g. a fork's dry run).
+      - name: Import codesigning certificate
+        env:
+          P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$P12_BASE64" ]; then
+            echo "::warning::MACOS_CERTIFICATE_P12_BASE64 not set, using ad-hoc signing"
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/cert.p12" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$P12_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          CERT_INFO=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "Developer ID Application" || true)
+          if [ -n "$CERT_INFO" ]; then
+            CERT_ID=$(echo "$CERT_INFO" | head -1 | awk -F'"' '{print $2}')
+            echo "APPLE_SIGNING_IDENTITY=$CERT_ID" >> "$GITHUB_ENV"
+            echo "Found certificate: $CERT_ID"
+          else
+            echo "::warning::No Developer ID Application certificate found, using ad-hoc signing"
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+          fi
+
+      # `app-sign` reads APPLE_SIGNING_IDENTITY. SKIP_SMOKE because a runner
+      # has no window server; `verify-archive` still runs and catches the same
+      # class of fault, and CI already ran the identical archive under xvfb.
+      - name: Build and sign the app
+        run: make -C love2d app SKIP_SMOKE=1
+
+      # Only with a real certificate: Apple refuses an ad-hoc signature, and a
+      # fork's dry run has no secrets. The Makefile checks this too and would
+      # stop before uploading; this keeps the log honest about why.
+      - name: Notarize and staple
+        if: env.APPLE_SIGNING_IDENTITY != '-'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: make -C love2d notarize
+
+      # What a person downloading it will actually get.
+      - name: Assess with Gatekeeper
+        run: make -C love2d gatekeeper
+
+      - name: Name the archive
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ARCH: ${{ steps.version.outputs.arch }}
+        run: |
+          mkdir -p artifacts
+          cp "love2d/build/CausewaybayRaiden-macos.zip" \
+             "artifacts/CausewaybayRaiden-$VERSION-$ARCH-apple-darwin.zip"
+          ( cd artifacts && shasum -a 256 *.zip > SHA256SUMS-macos )
+          cat artifacts/SHA256SUMS-macos
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: causewaybay-raiden-macos-${{ steps.version.outputs.arch }}
+          path: artifacts/*
+          if-no-files-found: error
+
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+  # -------------------------------------------------------- the portable .love
+  #
+  # The same game without a runtime inside it: one file that runs anywhere LÖVE
+  # 11.5 is installed, which is what a Linux or Windows player wants. Built on
+  # Linux and run there before it ships, so what is attached to the release has
+  # been started at least once.
+  archive:
+    name: Package the .love archive
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The same check the other job makes, because either job can be the one
+      # that catches it and neither should ship a mismatch.
+      - name: Resolve the version
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(make version)
+          if [ "${{ github.ref_type }}" = "tag" ] && [ "${TAG#v}" != "$version" ]; then
+            echo "tag $TAG does not match the version of record $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install X and software GL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libgl1 libglx-mesa0 libgl1-mesa-dri libopenal1 luajit
+
+      - name: Install LÖVE ${{ env.LOVE_VERSION }}
+        run: |
+          url="https://github.com/love2d/love/releases/download/$LOVE_VERSION/love-$LOVE_VERSION-x86_64.AppImage"
+          curl -fsSL -o love.AppImage "$url"
+          chmod +x love.AppImage
+          ./love.AppImage --appimage-extract > /dev/null
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'export APPDIR="'"$PWD"'/squashfs-root"' \
+            'exec "$APPDIR/AppRun" "$@"' \
+            | sudo tee /usr/local/bin/love > /dev/null
+          sudo chmod +x /usr/local/bin/love
+          love --version
+
+      - name: Build the archive and run it
+        env:
+          ALSOFT_DRIVERS: "null"
+          SDL_AUDIODRIVER: dummy
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" make love-smoke
+
+      - name: Name the archive
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p artifacts
+          cp "love2d/build/CausewaybayRaiden.love" \
+             "artifacts/CausewaybayRaiden-$VERSION.love"
+          ( cd artifacts && sha256sum *.love > SHA256SUMS-love )
+          cat artifacts/SHA256SUMS-love
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: causewaybay-raiden-love
+          path: artifacts/*
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub release
+    needs: [app, archive]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          body: |
+            **CAUSEWAYBAY RAIDEN** ${{ needs.app.outputs.version }} — a Hong Kong
+            vertical shmup. A rust programmer vs the bugs, from Causeway Bay to HKU.
+
+            | download | what is inside |
+            | --- | --- |
+            | `CausewaybayRaiden-…-apple-darwin.zip` | a double-clickable macOS `.app` with LÖVE 11.5 inside, signed and notarised — no install needed |
+            | `CausewaybayRaiden-….love` | the portable archive; needs [LÖVE 11.5](https://love2d.org/) on the machine that runs it |
+
+            Verify a download against `SHA256SUMS-macos` / `SHA256SUMS-love`, then:
+
+            ```sh
+            unzip CausewaybayRaiden-*-apple-darwin.zip
+            open CausewaybayRaiden.app
+            ```
+
+            or, with LÖVE installed:
+
+            ```sh
+            love CausewaybayRaiden-*.love
+            ```
+
+            Arrows to move, **Z** to shoot, **X** to bomb, **C** for a coin.

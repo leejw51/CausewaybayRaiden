@@ -75,6 +75,48 @@ World 1 maps: Causeway Bay, MTR Line, HKU Campus.
 - **Vertical** — portrait arcade cabinet (192×256 playfield)
 - **Horizontal** — landscape with side bezels
 
+## Build and release
+
+The version of record is one line in [`VERSION`](VERSION). A `v<version>` tag
+that disagrees with it stops the release build rather than shipping.
+
+```bash
+make check    # what CI runs: byte-compile every module, then the suite
+make love     # love2d/build/CausewaybayRaiden.love — needs LÖVE to run
+make app      # a double-clickable macOS .app with LÖVE 11.5 inside, signed
+make notarize # send that .app to Apple and staple the ticket
+```
+
+`make app` signs with a Developer ID if the machine has one and falls back to
+ad-hoc, which runs locally and nowhere else. Notarising is the step that makes
+a *downloaded* copy open without "Apple could not verify…", and it needs
+credentials this repository does not carry:
+
+```bash
+export APPLE_ID=you@example.com
+export APPLE_PASSWORD=abcd-efgh-ijkl-mnop   # app-specific, from appleid.apple.com
+export APPLE_TEAM_ID=ABCDE12345
+make notarize
+```
+
+CI runs the suite on Linux under xvfb — twice, once from the checkout and once
+from the packaged `.love`, because only the second can catch a module or a
+sprite left out of the archive — and builds the macOS bundle on every push.
+Pushing a `v*` tag runs [`release.yml`](.github/workflows/release.yml), which
+signs and notarises the app and attaches it, the portable `.love`, and their
+checksums to a GitHub release. It needs these repository secrets:
+
+| secret | what it is |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12_BASE64` | Developer ID Application certificate, `base64` of the `.p12` |
+| `MACOS_CERTIFICATE_PASSWORD` | the password that `.p12` was exported with |
+| `APPLE_ID` | the Apple ID to notarise as |
+| `APPLE_APP_SPECIFIC_PASSWORD` | an app-specific password for it |
+| `TEAM_ID` | the Developer Team ID |
+
+Without them the build still runs and falls back to ad-hoc signing, so a fork
+gets an unsigned bundle rather than a failure.
+
 ## Credits
 
 Causewaybay AI, 2026. Sprites and backgrounds generated for an MSX-style look. Chiptune and SFX are synthesized at runtime.
