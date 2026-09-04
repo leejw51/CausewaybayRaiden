@@ -1,0 +1,114 @@
+:root {
+  --void: #07060e;
+  --rust: #dc6645;
+  --gold: #ded188;
+  --cyan: #66dbf0;
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --vvw: 100dvw;
+  --vvh: 100dvh;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  height: var(--vvh, 100dvh);
+  background: var(--void);
+  color: var(--gold);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  width: var(--vvw, 100%);
+  height: 100%;
+  height: 100dvh;
+  height: var(--vvh, 100dvh);
+  overflow: hidden;
+  touch-action: none;
+}
+
+#view {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+  background: #000;
+  touch-action: none;
+}
+
+/* Only shown on a touch device; a keyboard needs none of this. */
+#touch {
+  display: none;
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  padding: 0 max(12px, var(--safe-r)) max(12px, var(--safe-b)) max(12px, var(--safe-l));
+  pointer-events: none;
+}
+
+html.touch #touch {
+  display: flex;
+}
+
+#touch button {
+  pointer-events: auto;
+  min-width: 58px;
+  min-height: 58px;
+  margin: 3px;
+  border: 1px solid var(--rust);
+  border-radius: 10px;
+  background: rgba(12, 10, 28, 0.6);
+  color: var(--cyan);
+  font: inherit;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  backdrop-filter: blur(2px);
+  touch-action: none;
+}
+
+#touch button:active {
+  background: rgba(220, 102, 69, 0.42);
+  color: #fff;
+}
+
+#touch .mid {
+  display: flex;
+}
+
+#touch .pad {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#touch .actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}

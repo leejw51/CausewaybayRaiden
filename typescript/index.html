@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#07060e" />
+    <meta name="description" content="Hong Kong vertical shmup. A rust programmer vs the bugs, from Causeway Bay to HKU." />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="RAIDEN" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2307060e'/%3E%3Cpath d='M8 2 L12 12 L8 10 L4 12 Z' fill='%23dc6645'/%3E%3Crect x='7' y='7' width='2' height='2' fill='%2366dbf0'/%3E%3C/svg%3E"
+    />
+    <title>CAUSEWAYBAY RAIDEN</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="stage">
+      <canvas id="view"></canvas>
+      <div id="touch" aria-hidden="true">
+        <div class="pad">
+          <button data-key="up">▲</button>
+          <div class="mid">
+            <button data-key="left">◀</button>
+            <button data-key="down">▼</button>
+            <button data-key="right">▶</button>
+          </div>
+        </div>
+        <div class="actions">
+          <button data-key="shoot">SHOT</button>
+          <button data-key="bomb">BOMB</button>
+          <button data-key="confirm">START</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

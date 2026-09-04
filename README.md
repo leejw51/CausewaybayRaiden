@@ -2,27 +2,30 @@
 
 Hong Kong vertical shmup. A rust programmer vs the bugs, from Causeway Bay to HKU.
 
-Made with [LÖVE](https://love2d.org/) 11.5 and Lua. Game source lives in [`love2d/`](love2d/).
+It exists twice, from the same design and the same art:
+
+| | | |
+| --- | --- | --- |
+| [`love2d/`](love2d/) | LÖVE 11.5 and Lua | the original; ships as a macOS app |
+| [`typescript/`](typescript/) | Rust compiled to wasm, TypeScript, three.js | the same game in a browser, on Cloudflare |
 
 ## Run
 
-LÖVE 11.5+ required (`brew install love` on macOS).
+The desktop game needs LÖVE 11.5+ (`brew install love` on macOS):
 
 ```bash
-make start
-```
-
-Tests:
-
-```bash
+make start        # or: love love2d
 make test
 ```
 
-Or from the game folder:
+The web game needs Rust and Node:
 
 ```bash
-love love2d
+make web-start    # http://localhost:5290
+make web-test
 ```
+
+`make help` lists everything.
 
 ## Controls
 
@@ -118,6 +121,31 @@ checksums to a GitHub release. It needs these repository secrets:
 
 Without them the build still runs and falls back to ad-hoc signing, so a fork
 gets an unsigned bundle rather than a failure.
+
+## The web port
+
+[`typescript/`](typescript/) is the same game with the parts swapped out that a
+browser will not run. Rust holds the simulation, the menus and the HUD, and
+compiles to a 136 KB wasm module; TypeScript gives it a canvas, a keyboard, Web
+Audio and local storage; three.js puts the finished frame through a CRT shader.
+A frame crosses the boundary as a flat list of drawing commands rather than as
+a stream of calls.
+
+Two things get better in the move. The art is shrunk at build time by a Rust
+tool using the same sizes and the same chroma key `src/gfx.lua` applies at
+launch, so 155 MB of source renders become about 1.5 MB of pixels. And the game
+becomes testable without a screen: `typescript/crates/raiden-core/tests/play.rs`
+plays stages at a fixed seed and a fixed frame time and asserts on what
+happens, which the LÖVE build cannot do because loading a sprite there needs a
+graphics context.
+
+[`typescript/README.md`](typescript/README.md) has the details.
+
+```bash
+make web-start    # play it locally
+make web-check    # what CI runs: lint, both suites, a production build
+make web-deploy   # wrangler deploy
+```
 
 ## Credits
 
