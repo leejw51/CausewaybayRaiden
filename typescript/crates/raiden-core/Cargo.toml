@@ -1,0 +1,13 @@
+[package]
+name = "raiden-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+# rlib as well as cdylib: the cdylib is what wasm-bindgen consumes, the rlib is
+# what `cargo test` links against so the simulation can be tested natively.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2.100"

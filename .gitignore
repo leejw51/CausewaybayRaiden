@@ -5,3 +5,16 @@ love2d/build/
 .cursor/
 *.swp
 *~
+
+# Web build output. The art is generated from love2d/assets by `make web-art`
+# and would otherwise put a megabyte and a half of PNGs in every diff.
+typescript/node_modules/
+typescript/dist/
+typescript/target/
+typescript/src/wasm/
+typescript/public/art/
+typescript/.run/
+typescript/.wrangler/
+typescript/test-results/
+typescript/playwright-report/
+.playwright-mcp/

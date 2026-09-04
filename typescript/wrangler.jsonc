@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "causewaybay-raiden",
+  "compatibility_date": "2026-09-04",
+  // Cloudflare Pages, not a Worker. The game is static — a page, a wasm
+  // module and a directory of PNGs — with nothing to run on the server side,
+  // and Pages is what the rest of this account already uses.
+  //
+  // `make deploy-workers` still exists for the Workers Static Assets route.
+  // It wants a token with `Workers Scripts: Edit`; this one only carries the
+  // Pages scope.
+  "pages_build_output_dir": "./dist"
+}

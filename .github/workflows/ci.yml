@@ -1,5 +1,5 @@
-# CI — what `make check` runs, plus the packaging path, split so a failure
-# names itself.
+# CI — what `make check` runs for both ports, plus the packaging path, split
+# so a failure names itself.
 #
 # The game is the engine: loading a sprite needs a graphics context, so there
 # is no honest headless shortcut and the suite runs inside LÖVE. Linux is where
@@ -12,6 +12,10 @@
 # macOS then only has to prove the bundle wraps that archive correctly, which
 # is the part that has no Linux equivalent: the embedded runtime, the plist,
 # the icon, and the signature.
+#
+# The web port needs none of that. Its game is Rust, so most of its suite runs
+# headless with no graphics context at all; a browser only comes in at the end,
+# to prove the wasm loads, WebGL draws, and the keys walk the cabinet.
 
 name: CI
 
@@ -112,6 +116,75 @@ jobs:
         with:
           name: CausewaybayRaiden-love
           path: love2d/build/*.love
+          if-no-files-found: error
+          retention-days: 7
+
+  web:
+    name: Test (web, Rust to wasm)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+
+      # The wasm target, and a cache that covers the registry, the build
+      # directory, and the wasm-bindgen CLI. Installing that CLI from source is
+      # the slowest thing in this job by a wide margin, so the key follows the
+      # lock file: it only rebuilds when the pinned version actually moves.
+      - name: Rust toolchain
+        run: |
+          rustup target add wasm32-unknown-unknown
+          rustup component add clippy rustfmt
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/wasm-bindgen
+            typescript/target
+          key: web-${{ runner.os }}-${{ hashFiles('typescript/Cargo.lock') }}
+          restore-keys: web-${{ runner.os }}-
+
+      # Formatting, lint and the headless simulation suite. This is the part
+      # the desktop port cannot have: the game runs with no window, at a fixed
+      # seed and a fixed frame time, and the suite asserts on what happens.
+      - name: Check the Rust
+        run: |
+          make -C typescript fmt-check
+          make -C typescript lint
+          make -C typescript test-rust
+
+      # The art comes from love2d/assets, which is in the checkout: this also
+      # proves the shrink still runs and still finds every source image.
+      - name: Build
+        run: make -C typescript build
+
+      - name: Browser-side suite
+        run: make -C typescript test-web
+
+      - name: Install Playwright
+        working-directory: typescript
+        run: npx playwright install --with-deps chromium
+
+      - name: End to end
+        run: make -C typescript e2e
+
+      # And again against the artifact that ships: the same bundle, served by
+      # Cloudflare's runtime rather than by Vite. It is the only step that can
+      # fail on a content type or an asset that never reached dist.
+      - name: End to end, against the Cloudflare bundle
+        run: make -C typescript e2e-dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CausewaybayRaiden-web
+          path: typescript/dist
           if-no-files-found: error
           retention-days: 7
 

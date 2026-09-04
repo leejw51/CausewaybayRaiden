@@ -1,0 +1,12 @@
+node_modules
+dist
+target
+src/wasm
+.run
+.wrangler
+*.log
+.DS_Store
+test-results
+playwright-report
+blob-report
+playwright/.cache

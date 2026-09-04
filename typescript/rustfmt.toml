@@ -1,0 +1,4 @@
+# Keep a chain or a call on one line whenever it fits the line width, instead
+# of breaking at rustfmt's much narrower sub-widths. The game reads better as
+# short declarative statements than as five-line builder ladders.
+use_small_heuristics = "Max"

@@ -1,0 +1,18 @@
+# The game logic is Rust, compiled to wasm; TypeScript is the shell around it.
+#
+#   crates/raiden-core  the simulation, compiled to wasm32-unknown-unknown
+#   crates/mkassets     a build tool that shrinks love2d/assets into public/art
+#
+# Two crates, one lock file, so `cargo test` covers the game and the asset
+# pipeline in one command and neither drags the other's dependencies into the
+# wasm binary.
+[workspace]
+resolver = "2"
+members = ["crates/raiden-core", "crates/mkassets"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
